@@ -1,7 +1,6 @@
 (ns com.fulcrologic.fulcro.algorithms.transit-spec
   (:require
     [com.fulcrologic.fulcro.algorithms.transit :as t]
-    [clojure.test :refer [are]]
     [fulcro-spec.core :refer [specification assertions]]))
 
 (specification "transit-clj->str and str->clj"
