@@ -3,6 +3,9 @@
   #?(:cljs (:require-macros com.fulcrologic.fulcro.algorithms.normalized-state-helpers))
   (:refer-clojure :exclude [get-in])
   (:require
+    [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
+    #?(:clj  [com.fulcrologic.fulcro.dom-server :as dom]
+       :cljs [com.fulcrologic.fulcro.dom :as dom])
     [edn-query-language.core :as eql]
     [clojure.spec.alpha :as s]
     [ghostwheel.core :refer [>defn =>]]
@@ -10,6 +13,83 @@
     [com.fulcrologic.fulcro.algorithms.denormalize :as fdn]
     [com.fulcrologic.fulcro.algorithms.merge :as merge]
     [com.fulcrologic.fulcro.components :as comp]))
+
+
+
+;;;;;;;;;;;;;;;;;;
+;; TODO
+
+;; - [ ] Test this namespace works in CLJC
+;; - [ ]  Learn how to run the ghostwheel test in the browser
+;; - [ ] Try out generative testing
+
+
+;; REMOVE this
+(def normalized-state {:car/id      {1 {:car/id 1, :car/model "T-150"},
+                                     2 {:car/id 2, :car/model "Ferrari"},
+                                     3 {:car/id 3, :car/model "Mercedez"}},
+                       :person/id   {1 {:person/id     1,
+                                        :person/name   "Joe",
+                                        :person/age    24,
+                                        :person/spouse [:person/id 2],
+                                        :person/cars   [[:car/id 1] [:car/id 2]]},
+                                     2 {:person/id     2,
+                                        :person/name   "Dafny",
+                                        :person/age    21,
+                                        :person/spouse [:person/id 2],
+                                        :person/cars   [[:car/id 3]]}},
+                       :root/person [[:person/id 1] [:person/id 2]]})
+
+
+;; REMOVE this
+(def denormalized-state-to-one {:root/person {:person/id     1,
+                                              :person/name   "Joe",
+                                              :person/age    24,
+                                              :person/spouse {:person/id   2,
+                                                              :person/name "Dafny",
+                                                              :person/age  21,
+                                                              :person/cars [{:car/id    3,
+                                                                             :car/model "Mercedez"}]}
+                                              :person/cars   [{:car/id 1, :car/model "T-150"}
+                                                              {:car/id 2, :car/model "Ferrari"}]}})
+
+;; REMOVE this
+(def denormalized-state-to-many {:root/person [{:person/id     1,
+                                                :person/name   "Joe",
+                                                :person/age    24,
+                                                :person/spouse {:person/id   2,
+                                                                :person/name "Dafny",
+                                                                :person/age  21,
+                                                                :person/cars [{:car/id    3,
+                                                                               :car/model "Mercedez"}]}
+                                                :person/cars   [{:car/id 1, :car/model "T-150"}
+                                                                {:car/id 2, :car/model "Ferrari"}]}
+                                               {:person/id   3,
+                                                :person/name "Billy",
+                                                :person/age  26,
+                                                :person/cars [{:car/id 4, :car/model "Tesla"}]}]})
+
+
+
+
+
+;;============================================================================
+
+;; helper
+(defn create-new-path [state path]
+  (loop [[h & t] path
+         new-path []]
+    ;; REMOVE this
+    #_(println "h => " h)
+    (if h
+      (let [np (conj new-path h)
+            c (clojure.core/get-in state np)]
+        ;; REMOVE this
+        #_(println "c => " c)
+        (if (eql/ident? c)
+          (recur t c)
+          (recur t (conj new-path h))))
+      new-path)))
 
 (>defn tree-path->db-path
   "Convert a 'denormalized' path into a normalized one by walking the path in state and honoring ident-based edges.
@@ -24,29 +104,57 @@
   => [:person/id 3 :person/first-name]
   ```
   "
-  [state path]
-  [map? vector? => vector?]
-  (loop [[h & t] path
-         new-path []]
-    (if h
-      (let [np (conj new-path h)
-            c  (clojure.core/get-in state np)]
-        (if (eql/ident? c)
-          (recur t c)
-          (recur t (conj new-path h))))
-      new-path)))
+  ([state path]
+   [map? vector? => vector?]
+   (let [new-path (create-new-path state path)]
+     (if (not= path new-path)
+       new-path
+       ;; NOTE delegate sending the nil to clj.core/get
+       path)))
+
+  ([state path not-found]
+   [map? vector? any? => vector?]
+   (let [new-path (create-new-path state path)]
+     (if (not= path new-path)
+       new-path
+       not-found))))
+
+
+
+(comment
+
+  '())
+
+
+;;============================================================================
 
 (>defn get-in
   "Just like clojure.core/get-in, but if an element of the path is an ident it will follow the ident instead."
   ([state-map path]
    [map? vector? => any?]
-   (get-in state-map path nil))
+   (clojure.core/get-in state-map (tree-path->db-path state-map path)))
+
   ([state-map path not-found]
    [map? vector? any? => any?]
    (clojure.core/get-in state-map (tree-path->db-path state-map path) not-found)))
 
+(comment
+
+  '())
+
+
+
+;;============================================================================
+(defn- dissoc-in
+  "Remove the given leaf of the `path` from recursive data structure `m`"
+  [m path]
+  (cond-> m
+          (clojure.core/get-in m (butlast path))
+          (update-in (butlast path) dissoc)))
+
+
 ;; TODO: see deep-remove-entity* (from incubator). I think the incubator implementation is technically insufficient. GC
-;; should check/clean all tables, but only one level deep (not a walk). Also, the cascading would be useful to implement.
+;; TODO should check/clean all tables, but only one level deep (not a walk). Also, the cascading would be useful to implement.
 (>defn remove-entity*
   "Remove the given entity at the given ident. Also scans all tables and removes any to-one or to-many idents that are
    found that match `ident` (removes dangling pointers to the removed entity).  The optional `cascade` parameter is a
@@ -54,17 +162,106 @@
    something, indicating it is safe to remove those entities as well).
 
    Returns the new state map with the entity(ies) removed."
-  ([state-map ident]
-   [map? eql/ident? => map?])
-  ([state-map ident cascade]
-   [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]))
 
-;; TODO: path-to-edge...should that be tree-path or db-path?
-;; TODO: needs cascade argument like remove-entity*
-;; NOTE: This is pretty much remove-ident*, but with the option of recursively removing the stuff
-;; pointed to...might need a better name.
-(defn remove-edge* [state-map path-to-edge]
+  ;;TODO
+  ([state-map ident]
+   [map? eql/ident? => map?]
+   )
+
+  ;;TODO
+  ([state-map ident cascade]
+   [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
+   )
   )
+
+
+
+;; REMOVE
+(defn deep-remove-entity*
+  "Recursively remove a table entry (by ident) and anything it recursively points to."
+  [state-map ident]
+  (let [item (get-in state-map ident)
+        idents (into []
+                     (comp (keep (fn [v]
+                                   (cond
+                                     (eql/ident? v)
+                                     [v]
+
+                                     (and (vector? v)
+                                          (every? eql/ident? v))
+                                     v)))
+                           cat)
+                     (vals item))]
+    (reduce
+      (fn [s i] (deep-remove-entity* s i))
+      (dissoc-in state-map ident)
+      idents)))
+
+
+
+(comment
+
+
+  (deep-remove-entity* normalized-state [:person/id 1])
+
+
+  (remove-entity* normalized-state [:person/id 1])
+
+  '())
+
+
+
+;;============================================================================
+
+;; TODO
+;; - [ ] `sort-identy-by`
+;;    (sort-idents-by :entity/field vector-of-idents)
+;;    This can enable
+;;    (swap! state update-in [:entity 1 :list] sort-idents-by :list/field)
+
+
+
+;;============================================================================
+
+;; TODO path-to-edge...should that be tree-path or db-path?
+;; NOTE This is pretty much remove-ident*, but with the option of recursively removing the stuff
+
+;; NOTE pointed to...might need a better name.
+(defn remove-edge*
+  ;; TODO
+  ([state-map path-to-edge])
+
+  ;; TODO needs cascade argument like remove-entity*
+  ([state-map path-to-edge cascade])
+  )
+
+(comment
+
+  (defn remove-ident*
+    "Removes an ident, if it exists, from a list of idents in app state. This
+    function is safe to use within mutations."
+    [state-map ident path-to-idents]
+    {:pre [(map? state-map)]}
+    (let [new-list (fn [old-list]
+                     (vec (filter #(not= ident %) old-list)))]
+      (update-in state-map path-to-idents new-list)))
+
+  )
+
+
+
+;============================================================================
+;; REMOVE
+(defsc A [this props]
+  {:ident         :person/id
+   :query         [:person/id :person/name]
+   :initial-state {:person/id 1 :person/name "Alice"}
+   :extra-data    42}
+  (dom/div "TODO"))
+
+
+(def ui-a (comp/factory A))
+
 
 (defn ui->props
   "Obtain a tree of props for a UI instance from the current application state. Useful in mutations where you want
@@ -75,7 +272,26 @@
   ([state-map component-class ident]
    (fdn/db->tree (comp/get-query component-class state-map) (get-in state-map ident) state-map)))
 
-;; These might belong in mutation ns???
+
+(comment
+
+  (comp/get-ident ui-a)
+
+  (comp/component->state-map ui-a)
+
+  (comp/component->state-map A)
+
+  (comp/react-type A)
+
+  (comp/get-ident A normalized-state)
+  (comp/get-query A )
+
+
+  '())
+
+;============================================================================
+
+;;NOTE These might belong in mutation ns???
 (defn update-caller!
   "Runs clojure.core/update on the table entry in the state database that corresponds to the mutation caller (which
    can be explicitly set via `:ref` when calling `transact!`).
@@ -84,6 +300,10 @@
   [{:keys [state ref] :as mutation-env} & args]
   (apply swap! state update-in ref args))
 
+
+;============================================================================
+
+;;NOTE These might belong in mutation ns???
 (defn update-caller-in!
   "Like swap! but starts at the ref from `env`, adds in supplied `path` elements (resolving across idents if necessary).
    Finally runs an update-in on that resultant path with the given `args`.
@@ -100,6 +320,40 @@
       (apply swap! state update-in path args)
       @state)))
 
+
+;============================================================================
+
+;; TODO: Untested...make up an env with a state atom and see if it works in clj/cljs
+
+#?(:clj
+   (defmacro swap*                                          ;; or alternate name could be `state-swap!`
+     "A macro that is equivalent to:
+
+     ```
+     (swap! (:state env) (fn [s] (-> s ...forms...)))
+     ```
+
+     E.g.
+
+     ```
+     (swap!-> env
+       (merge/merge-component ...)
+       (integrate-ident* ...))
+     ```
+
+
+     "
+     [mutation-env & forms]
+     `(swap! (:state ~mutation-env) (fn [s#]
+                                      (-> s#
+                                          ~@forms)))))
+
+
+
+
+;;================== ALIASES ============================
+
+;; NOTE: These are already tested in their respective test suites
 ;; aliases to integrate-ident* and remove-ident*, with doc strings...
 
 (def integrate-ident*
@@ -123,34 +377,9 @@
   targeting/integrate-ident*)
 
 (def remove-ident*
-  "
-  [state-map ident path-to-idents]
+  " [state-map ident path-to-idents]
 
   Removes an ident, if it exists, from a list of idents in app state. This
   function is safe to use within mutations."
   merge/remove-ident*)
 
-;; TODO: Untested...make up an env with a state atom and see if it works in clj/cljs
-;; TODO: better name???
-#?(:clj
-   (defmacro swap!->
-     "A macro that is equivalent to:
-
-     ```
-     (swap! (:state env) (fn [s] (-> s ...forms...)))
-     ```
-
-     E.g.
-
-     ```
-     (swap!-> env
-       (merge/merge-component ...)
-       (integrate-ident* ...))
-     ```
-
-
-     "
-     [mutation-env & forms]
-     `(swap! (:state ~mutation-env) (fn [s#]
-                                      (-> s#
-                                        ~@forms)))))
