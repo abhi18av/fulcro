@@ -1,198 +1,327 @@
 (ns com.fulcrologic.fulcro.algorithms.normalized-state-helpers-spec
   (:require
-    [fulcro-spec.core :refer [assertions specification component when-mocking behavior]]
+    [fulcro-spec.core :refer [assertions specification component when-mocking behavior =>]]
+    [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
     [com.fulcrologic.fulcro.algorithms.normalized-state-helpers :as nsh]))
 
 
 ;;============================================================================
-;; helpers
-
-(def normalized-state {:car/id      {1 {:car/id 1, :car/model "T-150"},
-                                     2 {:car/id 2, :car/model "Ferrari"},
-                                     3 {:car/id 3, :car/model "Mercedez"}},
-                       :person/id   {1 {:person/id     1,
-                                        :person/name   "Joe",
-                                        :person/age    24,
-                                        :person/spouse [:person/id 2],
-                                        :person/cars   [[:car/id 1] [:car/id 2]]},
-                                     2 {:person/id     2,
-                                        :person/name   "Dafny",
-                                        :person/age    21,
-                                        :person/spouse [:person/id 2],
-                                        :person/cars   [[:car/id 3]]}},
-                       :root/person [[:person/id 1] [:person/id 2]]})
 
 
-(def denormalized-state-to-one {:root/person {:person/id     1,
-                                              :person/name   "Joe",
-                                              :person/age    24,
-                                              :person/spouse {:person/id   2,
-                                                              :person/name "Dafny",
-                                                              :person/age  21,
-                                                              :person/cars [{:car/id    3,
-                                                                             :car/model "Mercedez"}]}
-                                              :person/cars   [{:car/id 1, :car/model "T-150"}
-                                                              {:car/id 2, :car/model "Ferrari"}]}})
+(specification "tree-path->db-path"
 
-(def denormalized-state-to-many {:root/person [{:person/id     1,
-                                                :person/name   "Joe",
-                                                :person/age    24,
-                                                :person/spouse {:person/id   2,
-                                                                :person/name "Dafny",
-                                                                :person/age  21,
-                                                                :person/cars [{:car/id    3,
-                                                                               :car/model "Mercedez"}]}
-                                                :person/cars   [{:car/id 1, :car/model "T-150"}
-                                                                {:car/id 2, :car/model "Ferrari"}]}
-                                               {:person/id   3,
-                                                :person/name "Billy",
-                                                :person/age  26,
-                                                :person/cars [{:car/id 4, :car/model "Tesla"}]}]})
+  (behavior "Resolves top-level to-one references"
+    (let [state {:fastest-car [:car/id 1]
+                 :car/id      {1 {:car/model "model-1"}
+                               2 {:car/model "model-2"}}}]
+      (assertions
+        (nsh/tree-path->db-path state [:fastest-car])
+        => [:car/id 1])))
 
+  (behavior "Resolves top-level to-many references"
+    (let [state {:grandparents [[:person/id 1] [:person/id 2]]
+                 :person/id    {1 {:person/name "person-1"}
+                                2 {:person/name "person-2"}}}]
+      (assertions
+        (nsh/tree-path->db-path state [:grandparents 1])
+        => [:person/id 2])))
 
+  (behavior "Resolves table-nested to-one references"
+    (let [state {:person/id {1 {:person/name  "person-1"
+                                :person/email [:email/id 1]}
+                             2 {:person/name  "person-2"
+                                :person/email [:email/id 2]}}
+                 :email/id  {1 {:email/provider "Google"}}}]
+      (assertions
+        (nsh/tree-path->db-path state [:person/id 1 :person/email])
+        => [:email/id 1])))
 
+  (behavior "Resolves table-nested to-many references"
+    (let [state {:person/id {1 {:person/name "person-1"
+                                :person/cars [[:car/id 1] [:car/id 2]]}
+                             2 {:person/name "person-2"
+                                :person/cars [[:car/id 1]]}}
+                 :car/id    {1 {:car/model "model-1"}
+                             2 {:car/model "model-2"}}}]
+      (assertions
+        (nsh/tree-path->db-path state [:person/id 1 :person/cars 0])
+        => [:car/id 1]))))
 
 ;;============================================================================
 
-
-
-
-(specification "tree-path->db-path" :focus
-  (behavior "In normalized DB, when root key is a to-many list of idents"
-    (let [state normalized-state]
+(specification "get-in"
+  (behavior "Follows edges from root that are normalized"
+    (let [state {:person/id {1 {:person/name "person-1"}
+                             2 {:person/name "person-2"}}}]
       (assertions
-        (nsh/tree-path->db-path state [:person/id 1 :person/spouse :person/name])
-        => [:person/id 2 :person/name])))
+        (get-in state [:person/id 1 :person/name]) => "person-1")))
 
-  (behavior "In normalized DB, follows idents ending with to-many relations"
-    (let [state normalized-state]
+  (behavior "Behaves like clojure.core/get-in for denormalized data"
+    (let [denorm-data {:a [[:b 1]] :b [:b 1]}
+          state {:denorm {:level-1 {:level-2 denorm-data}}}]
       (assertions
-        (nsh/tree-path->db-path state [:person/id 1 :person/spouse :person/cars :car/id])
-        => [:person/id 2 :person/cars :car/id])))
+        (nsh/get-in state [:denorm :level-1 :level-2]) => denorm-data)))
 
-  (behavior "In normalized DB, returns not-found when the path doesn't exist"
-    (let [state normalized-state]
+  (behavior "Returns nil when the value isn't found"
+    (let [state {:person/id {1 {:person/name "person-1"
+                                :person/cars [[:car/id 1] [:car/id 2]]}
+                             2 {:person/name "person-2"
+                                :person/cars [[:car/id 1]]}}}]
       (assertions
-        (nsh/tree-path->db-path state [:root/person 4 :person/id] "not-found")
-        => "not-found")))
+        (nsh/get-in state [:person/id 1 :person/email]) => nil
+        (nsh/get-in state [:car/id 1]) => nil)))
 
-  #_(behavior "In denormalized DB, follows idents ending with to-many relations"
-              (let [state denormalized-state]
-                ;; TODO [:table-key 3 :to-one-field :attr]
-                (assertions
-                  (nsh/tree-path->db-path state [:car/id 1 :car/model])
-                  => [:person/id 2 :person/first-name])))
-
-  )
-
-;;============================================================================
-
-(specification "get-in" :focus
-  (behavior "Follows edges from root that are denormalized"
-    (let [state {:a [:b 1]
-                 :b {1 {:c [:d 1]}}
-                 :d {1 {:value 42}}}]
-      (assertions
-        (nsh/get-in state [:a :c :value]) => 42)))
-
-  (behavior "Behaves like a normal clojure get-in"
-    (let [state {:a {:c {:value 42}}}]
-      (assertions
-        (nsh/get-in state [:a :c :value]) => 42)))
-
-  ;; FIXME
-  (behavior "Follows edges from root that are denormalized"
-    (let [state normalized-state]
-      (assertions
-        (nsh/get-in normalized-state [:person/id 1 :person/spouse :person/name]) => "Dafny")))
 
   (behavior "Returns not-found when provided this option"
-    (let [state normalized-state]
+    (let [state {:person/id {1 {:person/name  "person-1"
+                                :person/email [:email/id 1]}
+                             2 {:person/name  "person-2"
+                                :person/email [:email/id 2]}}}]
       (assertions
-        (nsh/get-in state [:person/id 3 :person/spouse :person/name] "not-found") => "not-found")))
-
-
-  )
+        (nsh/get-in state [:person/id 3 :person/name] "not-found") => "not-found"))))
 
 
 ;;============================================================================
 
 (specification "remove-entity*"
-  (behavior "1"
-    (let [state {:a [:b 1]
-                 :b {1 {:c [:d 1]}}
-                 :d {1 {:value 42}}}]
+  (behavior "Without cascading"
+    (let [denorm-data {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}
+
+          state {:fastest-car  [:car/id 1]
+                 :grandparents [[:person/id 1] [:person/id 2]]
+                 :denorm       {:level-1 {:level-2 denorm-data}}
+                 :person/id    {1 {:person/name  "person-1"
+                                   :person/cars  [[:car/id 1] [:car/id 2]]
+                                   :person/email [:email/id 1]}
+                                2 {:person/name  "person-2"
+                                   :person/cars  [[:car/id 1]]
+                                   :person/email [:email/id 2]}}
+                 :car/id       {1 {:car/model "model-1"}
+                                2 {:car/model "model-2"}}
+                 :email/id     {1 {:email/provider "Google"}
+                                2 {:email/provider "Microsoft"}}}]
       (assertions
-        (nsh/get-in state [:a :c :value]) => 42)))
-  )
+        "Removes the entity itself from the database"
+        (-> (nsh/remove-entity* state [:person/id 1])
+            (get-in [:person/id 1])
+            nil?) => true
+        "Removes top-level to-one references"
+        (-> (nsh/remove-entity* state [:car/id 1]) :fastest-car nil?) => true
+        "Removes top-level to-many refs"
+        (-> (nsh/remove-entity* state [:person/id 1]) :grandparents) => [[:person/id 2]]
+        "Ignores denormalized data"
+        (-> (nsh/remove-entity* state [:person/id 1]) (get-in [:denorm :level-1 :level-2])) => denorm-data
+        "Removes table-nested to-one references"
+        (-> (nsh/remove-entity* state [:email/id 1]) (get-in [:person/id 1 :person/email]) nil?) => true
+        "Removes table-nested to-many refs"
+        (-> (nsh/remove-entity* state [:car/id 1]) (get-in [:person/id 1 :person/cars])) => [[:car/id 2]])))
 
+  ;; TODO implement the test cases for testing the cascading.
+  (behavior "With cascading"
+    (let [state {:fastest-car  [:car/id 1]
+                 :grandparents [[:person/id 1] [:person/id 2]]
+                 :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}}}
+                 :person/id    {1 {:person/name     "person-1"
+                                   :person/spouse   [:person/id 2]
+                                   :person/email    [:email/id 1]
+                                   :person/cars     [[:car/id 1]]
+                                   :person/children [[:person/id 3]
+                                                     [:person/id 4]
+                                                     [:person/id 5]]}
+                                2 {:person/name     "person-2"
+                                   :person/spouse   [:person/id 1]
+                                   :person/cars     [[:car/id 1]
+                                                     [:car/id 2]]
+                                   :person/children [[:person/id 3]
+                                                     [:person/id 4]
+                                                     [:person/id 5]]}
+                                3 {:person/name "person-3"}
+                                4 {:person/name     "person-4"
+                                   :person/spouse   [:person/id 6]
+                                   :person/children [:person/id 7]}
+                                5 {:person/name "person-5"}
+                                6 {:person/id       6
+                                   :person/name     "person-6"
+                                   :person/spouse   [:person/id 4]
+                                   :person/children [:person/id 7]}
+                                7 {:person/name "person-7"}}
+                 :car/id       {1 {:car/model  "model-1"
+                                   :car/engine [:engine/id 1]}
+                                2 {:car/model  "model-2"
+                                   :car/engine [:engine/id 2]}}
+                 :engine/id    {1 {:engine/name "engine-1"}
+                                2 {:engine/name "engine-2"}}
+                 :email/id     {1 {:email/provider "Google"}
+                                2 {:email/provider "Microsoft"}}}]
+      (assertions
+
+        "Removes a single, to-one and non-recursive cascased entity"
+        (-> (nsh/remove-entity* state [:person/id 1] #{:person/email})
+            (get [:email/id 1])
+            nil?) => true
+
+        "Removes a single, to-many and non-recursive cascased entity"
+        (-> (nsh/remove-entity* state [:person/id 1] #{:person/cars})
+            (affects...
+              (get [:car/id 1])
+              (get [:car/id 2]))
+            nil?) => true
+
+        "Removes multiple, to-one and non-recursive cascased entity"
+        (-> (nsh/remove-entity* state [:person/id 1] #{:person/email :person/cars})
+            (affects...
+              (get [:email/id 1])
+              (get [:car/id 1])
+              (get [:car/id 2]))
+            nil?) => true
+
+        "Removes a single, to-many and recursive cascased entities"
+        (-> (nsh/remove-entity* state [:person/id 1] #{:person/children})
+            (affects...
+              (get [:person/id 3])
+              (get [:person/id 4])
+              (get [:person/id 5])
+              (get [:person/id 7]))
+            nil?) => true
+
+        "Removes multiple, to-many and recursive cascased entities"
+        (-> (nsh/remove-entity* state [:person/id 1] #{:person/children :person/spouse})
+            (affects...
+              (get [:person/id 2])
+              (get [:person/id 3])
+              (get [:person/id 4])
+              (get [:person/id 5])
+              (get [:person/id 6])
+              (get [:person/id 7]))
+            nil?) => true
+
+        ;; TODO add cases for person -> car -> engine
+        ))
+    ))
 
 ;============================================================================
-
 (specification "remove-edge*"
-  (behavior "1"
-    (let [state {:a [:b 1]
-                 :b {1 {:c [:d 1]}}
-                 :d {1 {:value 42}}}]
-      #_(assertions
-          (nsh/get-in state [:a :c :value]) => 42)))
-  )
+  (component "Simple to-one edge removal"
+    (let [state {:fastest-car [:car/id 1]
+                 :car/id      {1 {:car/engine [:engine/id 1]}}
+                 :engine/id   {1 {:engine/id    1
+                                  :engine/model "engine-1"}}}]
+      (assertions
+        "Removes top-level to-one edge"
+        (-> (nsh/remove-edge* state [:fastest-car])
+            (get-in [:fastest-car])) => {}
+
+        "Removes table-nested edge"
+        (-> (nsh/remove-edge* state [:car/id 1 :car/engine])
+            (get-in [:car/id 1 :car/engine])) => {}
+
+        "Refuses to remove something that is not a normalized edge"
+        (nsh/remove-edge* state [:car/id 1 :car/model]) => state
+        (nsh/remove-edge* state [:car/id 1]) => state
+        (nsh/remove-edge* state [:car/id]) => state)))
+
+
+  ;; TODO
+  #_(component "Recursive to-one edge removal"
+               (let [state {:a [:b 1]
+                            :b {1 {:c [:d 1]}}
+                            :d {1 {:value 42 :other [:e 2] :keeper [:e 3]}}
+                            :e {2 {:x 1}
+                                3 {:y 1}}}]
+
+                 (assertions
+                   "Can cascade a delete across named edge, removing the ident on the :other edge from it's own table"
+                   (-> (nsh/remove-edge* state [:b 1 :c] #{:other})
+                       (get-in [:e 2])
+                       nil?) => true)
+
+                 (assertions
+                   "Can cascade a delete across named edges, leaving the ident on the :keeper edge it's in own table"
+                   (-> (nsh/remove-edge* state [:b 1 :c] #{:other})
+                       (get-in [:e 3])) => {:y 1})
+                 ;; TODO: other cases, like to-many w/o cascading,  to-many with cascading, etc.
+                 )))
 
 ;============================================================================
 
+;; TODO
+(specification "sort-idents-by"
+  (behavior "1"
+    (let [state (atom {:grandparents [[:person/id 3] [:person/id 2]]
+                       :person/id    {1 {:person/name     "person-1"
+                                         :person/children [[:person/id 3]
+                                                           [:person/id 9]
+                                                           [:person/id 5]]}
+                                      2 {:person/name "person-2"
+                                         :person/cars [[:car/id 1]
+                                                       [:car/id 2]]}}
+                       :car/id       {1 {:car/model "model-1"}
+                                      2 {:car/model "model-2"}}})]
+      (nsh/sort-idents-by
+        :person/id
+        (clojure.core/get-in @state [:person/id 1 :person/children])) => [])))
 
+
+;============================================================================
+
+(defsc Person [this {:keys [:person/id :person/name :person/children] :as props}]
+  {:query [:person/id :person/name {:person/children '...}]
+   :ident :person/id})
 
 (specification "ui->props"
-  (behavior "1"
-    (let [state {:a [:b 1]
-                 :b {1 {:c [:d 1]}}
-                 :d {1 {:value 42}}}]
-      #_(assertions
-        (nsh/get-in state [:a :c :value]) => 42)))
-  )
-
+  (behavior "Pulls the props from the component given the app state"
+    (let [state {:person/id {1 {:person/id       1 :person/name "Dad"
+                                :person/children [[:person/id 2] [:person/id 3]]}
+                             2 {:person/id 2 :person/name "Son"}
+                             3 {:person/id 3 :person/name "Daughter"}}}]
+      (nsh/ui->props state Person [:person/id 1]) => {:person/id       1 :person/name "Dad"
+                                                      :person/children [{:person/id 2 :person/name "Son"}
+                                                                        {:person/id 3 :person/name "Daughter"}]})))
 
 ;============================================================================
 
 (specification "update-caller!"
   (behavior "1"
-    (let [state {:a [:b 1]
-                 :b {1 {:c [:d 1]}}
-                 :d {1 {:value 42}}}]
-      #_(assertions
-        (nsh/update-caller! state [:a :c :value]) => 42)))
+    (let [state-atom (atom {:person/id {1 {:person/id 1 :person/name "Dad"}}})
+          mutation-env {:ref [:person/id 1] :state state-atom}]
+      (nsh/update-caller! mutation-env assoc :person/name "Mom")
 
-  )
+      (assertions
+        "Updates the caller from the env of the mutation"
+        (nsh/get-in @state-atom [:person/id 1]) => {:person/id 1 :person/name "Mom"}))))
 
 ;============================================================================
-
-
+;; TODO
 (specification "update-caller-in!"
-  (behavior "Follows edges from root that are denormalized"
-    (let [state {:a [:b 1]
-                 :b {1 {:c [:d 1]}}
-                 :d {1 {:value 42}}}]
-      #_(assertions
-        (nsh/update-caller-in! state [:a :c :value]) => 42)))
-  )
+  (behavior "1"
+    (let [state-atom (atom {:person/id {1 {:person/id       1 :person/name "Dad"
+                                           :person/children [[:person/id 2] [:person/id 3]]}
+                                        2 {:person/id 2 :person/name "Son"}
+                                        3 {:person/id 3 :person/name "Daughter"}}})
+          mutation-env {:ref [:person/id 1] :state state-atom}]
+      (nsh/update-caller! mutation-env assoc :person/name "Mom")
+
+      (assertions
+        "Updates the caller from the env of the mutation"
+        (nsh/get-in @state-atom [:person/id 1]) => {:person/id 1 :person/name "Mom"}))))
 
 
 ;============================================================================
 
-(specification "swap*"
+(specification "swap!->"
   (behavior "1"
     (let [state {:a {:c {:value 42}}}]
-      #_(assertions
-        (nsh/swap* state [:a :c :value]) => 42)))
+      (assertions
+        (nsh/swap!-> state [:a :c :value]) => 42)))
   )
 
 
 
 (comment
   (def env {:state (atom {})})
-  (nsh/swap* env
-               (assoc :x 1)
-               (update :x inc))
+  (nsh/swap!-> env
+             (assoc :x 1)
+             (update :x inc))
 
   env
 
