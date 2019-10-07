@@ -212,7 +212,7 @@
   (reduce
     (fn [s edge]
       (if (every? eql/ident? edge)
-        (reduce (fn [s2 ident] (remove-entity-tk* s ident cascade)) s edge)
+        (reduce (fn [s2 ident] (remove-entity-tk* s2 ident cascade)) s edge)
         (remove-entity-tk* s edge cascade)))
     state-map
     (set/intersection (set cascade) (set (keys starting-entity)))))
@@ -232,7 +232,8 @@
                                   (map (fn [k]
                                          (if top-key
                                            [top-key k]
-                                           [k])) (keys (get state-map top-key))))
+                                           [k]))
+                                    (keys (get state-map top-key))))
         remove-ident-from-table (fn [state-map table]
                                   (reduce
                                     remove-idents-at-path
