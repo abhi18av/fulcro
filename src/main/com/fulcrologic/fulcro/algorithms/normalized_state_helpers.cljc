@@ -219,6 +219,7 @@
 
 (>defn remove-entity-tk*
   [state-map ident cascade]
+  [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
   (let [tables                  (keep (fn [k]
                                         (let [candidate (get state-map k)]
                                           (when (and (map? candidate) (every? map? (vals candidate)))
