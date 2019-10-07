@@ -85,7 +85,8 @@
 
 (specification "remove-entity*"
   (behavior "Without cascading"
-    (let [denorm-data {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}
+    (let [denorm-data {:a [[:person/id 1] [:person/id 2]]
+                       :b [:person/id 1]}
 
           state {:fastest-car  [:car/id 1]
                  :grandparents [[:person/id 1] [:person/id 2]]
@@ -102,57 +103,45 @@
                                 2 {:email/provider "Microsoft"}}}]
       (assertions
         "Removes the entity itself from the database"
-        (-> (nsh/remove-entity* state [:person/id 1])
+        (-> (nsh/remove-entity* state [:person/id 1] #{})
             (get-in [:person/id 1])
-            nil?) => true
+            ) => nil
         "Removes top-level to-one references"
-        (-> (nsh/remove-entity* state [:car/id 1]) :fastest-car nil?) => true
+        (-> (nsh/remove-entity* state [:car/id 1] #{}) :fastest-car) => []
         "Removes top-level to-many refs"
-        (-> (nsh/remove-entity* state [:person/id 1]) :grandparents) => [[:person/id 2]]
+        (-> (nsh/remove-entity* state [:person/id 1] #{}) :grandparents) => [[:person/id 2]]
         "Ignores denormalized data"
-        (-> (nsh/remove-entity* state [:person/id 1]) (get-in [:denorm :level-1 :level-2])) => denorm-data
+        (-> (nsh/remove-entity* state [:person/id 1] #{}) (get-in [:denorm :level-1 :level-2])) => denorm-data
         "Removes table-nested to-one references"
-        (-> (nsh/remove-entity* state [:email/id 1]) (get-in [:person/id 1 :person/email]) nil?) => true
+        (-> (nsh/remove-entity* state [:email/id 1] #{}) (get-in [:person/id 1 :person/email]) nil?) => true
         "Removes table-nested to-many refs"
-        (-> (nsh/remove-entity* state [:car/id 1]) (get-in [:person/id 1 :person/cars])) => [[:car/id 2]])))
+        (-> (nsh/remove-entity* state [:car/id 1] #{}) (get-in [:person/id 1 :person/cars])) => [[:car/id 2]]
+        )))
 
-  ;; TODO implement the test cases for testing the cascading.
-  (behavior "With cascading"
+
+  (behavior "With cascading, non-recursive behavior"
     (let [state {:fastest-car  [:car/id 1]
                  :grandparents [[:person/id 1] [:person/id 2]]
-                 :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]] :b [:person/id 1]}}}
-                 :person/id    {1 {:person/name     "person-1"
+                 :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                                    :b [:person/id 1]}}}
+                 :person/id    {1 {:person/id       1
                                    :person/spouse   [:person/id 2]
                                    :person/email    [:email/id 1]
-                                   :person/cars     [[:car/id 1]]
-                                   :person/children [[:person/id 3]
-                                                     [:person/id 4]
-                                                     [:person/id 5]]}
-                                2 {:person/name     "person-2"
-                                   :person/spouse   [:person/id 1]
                                    :person/cars     [[:car/id 1]
                                                      [:car/id 2]]
-                                   :person/children [[:person/id 3]
-                                                     [:person/id 4]
-                                                     [:person/id 5]]}
-                                3 {:person/name "person-3"}
-                                4 {:person/name     "person-4"
-                                   :person/spouse   [:person/id 6]
-                                   :person/children [:person/id 7]}
-                                5 {:person/name "person-5"}
-                                6 {:person/id       6
-                                   :person/name     "person-6"
-                                   :person/spouse   [:person/id 4]
-                                   :person/children [:person/id 7]}
-                                7 {:person/name "person-7"}}
-                 :car/id       {1 {:car/model  "model-1"
-                                   :car/engine [:engine/id 1]}
-                                2 {:car/model  "model-2"
-                                   :car/engine [:engine/id 2]}}
-                 :engine/id    {1 {:engine/name "engine-1"}
-                                2 {:engine/name "engine-2"}}
-                 :email/id     {1 {:email/provider "Google"}
-                                2 {:email/provider "Microsoft"}}}]
+                                   :person/children [[:person/id 3]]}
+                                2 {:person/id       2
+                                   :person/spouse   [:person/id 1]
+                                   :person/children [[:person/id 3]]}
+                                3 {:person/id 3}}
+                 :car/id       {1 {:car/id    1
+                                   :car/model "model-1"}
+                                2 {:car/id    2
+                                   :car/model "model-2"}}
+                 :engine/id    {1 {:engine/id   1
+                                   :engine/name "engine-1"}}
+                 :email/id     {1 {:email/id       1
+                                   :email/provider "Google"}}}]
       (assertions
 
         "Removes a single, to-one and non-recursive cascased entity"
@@ -161,43 +150,55 @@
             nil?) => true
 
         "Removes a single, to-many and non-recursive cascased entity"
-        (-> (nsh/remove-entity* state [:person/id 1] #{:person/cars})
-            (affects...
-              (get [:car/id 1])
-              (get [:car/id 2]))
-            nil?) => true
+        (let [new-state (nsh/remove-entity* state [:person/id 1] #{:person/cars})]
+          (and
+            (get new-state [:car/id 1])
+            (get new-state [:car/id 2]))) => nil
 
         "Removes multiple, to-one and non-recursive cascased entity"
-        (-> (nsh/remove-entity* state [:person/id 1] #{:person/email :person/cars})
-            (affects...
-              (get [:email/id 1])
-              (get [:car/id 1])
-              (get [:car/id 2]))
-            nil?) => true
+        (let [new-state (nsh/remove-entity* state [:person/id 1]
+                                            #{:person/email :person/cars})]
+          (and
+            (get new-state [:email/id 1])
+            (get new-state [:car/id 1])
+            (get new-state [:car/id 2]))) => nil)))
 
-        "Removes a single, to-many and recursive cascased entities"
-        (-> (nsh/remove-entity* state [:person/id 1] #{:person/children})
-            (affects...
-              (get [:person/id 3])
-              (get [:person/id 4])
-              (get [:person/id 5])
-              (get [:person/id 7]))
-            nil?) => true
+  (behavior "With cascading, recursive behavior"
+    (let [state {:fastest-car  [:car/id 1]
+                 :grandparents [[:person/id 1] [:person/id 2]]
+                 :denorm       {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                                    :b [:person/id 1]}}}
+                 :person/id    {1 {:person/id       1
+                                   :person/spouse   [:person/id 2]
+                                   :person/email    [:email/id 1]
+                                   :person/cars     [[:car/id 1]
+                                                     [:car/id 2]]
+                                   :person/children [[:person/id 3]]}
+                                2 {:person/id       2
+                                   :person/spouse   [:person/id 1]
+                                   :person/children [[:person/id 3]]}
+                                3 {:person/id 3}}
+                 :car/id       {1 {:car/id    1
+                                   :car/model "model-1"}
+                                2 {:car/id    2
+                                   :car/model "model-2"}}
+                 :engine/id    {1 {:engine/id   1
+                                   :engine/name "engine-1"}}
+                 :email/id     {1 {:email/id       1
+                                   :email/provider "Google"}}}]
+      (assertions
 
-        "Removes multiple, to-many and recursive cascased entities"
-        (-> (nsh/remove-entity* state [:person/id 1] #{:person/children :person/spouse})
-            (affects...
-              (get [:person/id 2])
-              (get [:person/id 3])
-              (get [:person/id 4])
-              (get [:person/id 5])
-              (get [:person/id 6])
-              (get [:person/id 7]))
-            nil?) => true
+        "Removes a single, to-many cascased entities"
+        (let [new-state (nsh/remove-entity* state [:person/id 1] #{:person/children})]
+          (get new-state [:person/id 3])) => nil
 
-        ;; TODO add cases for person -> car -> engine
-        ))
-    ))
+        "Removes multiple, to-many cascased entities"
+        (let [new-state (nsh/remove-entity* state [:person/id 1]
+                                            #{:person/children :person/spouse})]
+          (and
+            (get new-state [:person/id 2])
+            (get new-state [:person/id 3]))) => nil))))
+
 
 ;============================================================================
 (specification "remove-edge*"
@@ -320,8 +321,8 @@
 (comment
   (def env {:state (atom {})})
   (nsh/swap!-> env
-             (assoc :x 1)
-             (update :x inc))
+               (assoc :x 1)
+               (update :x inc))
 
   env
 
