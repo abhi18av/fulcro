@@ -4,6 +4,7 @@
   (:refer-clojure :exclude [get-in])
   (:require
     [clojure.walk :as walk]
+    [clojure.set :as set]
     [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
     #?(:clj  [com.fulcrologic.fulcro.dom-server :as dom]
        :cljs [com.fulcrologic.fulcro.dom :as dom])
@@ -46,7 +47,7 @@
           new-path []]
      (if h
        (let [np (conj new-path h)
-             c (clojure.core/get-in state np)]
+             c  (clojure.core/get-in state np)]
          (if (eql/ident? c)
            (recur t c)
            (recur t (conj new-path h))))
@@ -114,7 +115,7 @@
   "Predicate to check wheter the argument is a `nil` of a single `vector` "
   [a-value]
   (or (nil? a-value)
-      (vector? a-value)))
+    (vector? a-value)))
 
 (defn- vector-of-vectors?
   "Predicate to check whether the argument is a strictly vector of vectors"
@@ -145,16 +146,16 @@
                         (if (>= (count a-path) 4)
                           ;; don't follow idents for denormalized paths
                           (clojure.core/get-in (state-after-top-level-ident-dissoc state-map ident)
-                                               a-path)
+                            a-path)
                           ;; follow idents for denormalized paths
                           (get-in (state-after-top-level-ident-dissoc state-map ident)
-                                  a-path)))]
+                            a-path)))]
     (map (fn [a-path]
            (if (map? (value-at-path a-path))
              ;; finds db-path from the original app-db
              (tree-path->db-path state-map a-path)
              (value-at-path a-path)))
-         (all-paths-after-top-level-dissoc state-map ident))))
+      (all-paths-after-top-level-dissoc state-map ident))))
 
 
 (defn- entity-path-value-map-after-top-level-dissoc
@@ -163,7 +164,7 @@
   The values contain the `nil` introduced for an `ident` by the `state-after-top-level-ident-dissoc`"
   [state-map ident]
   (zipmap (all-paths-after-top-level-dissoc state-map ident)
-          (all-values-at-path-after-top-level-dissoc state-map ident)))
+    (all-values-at-path-after-top-level-dissoc state-map ident)))
 
 
 (defn- prune-ident
@@ -177,7 +178,7 @@
       (nil? a-value) (dissoc-in state-map a-path)
 
       (vector-of-vectors? a-value) (assoc-in state-map a-path
-                                             (apply vector (remove #{ident} a-value)))
+                                     (apply vector (remove #{ident} a-value)))
       :else state-map)))
 
 ;;====
@@ -201,8 +202,53 @@
    [map? eql/ident? (s/coll-of keyword? :kind set?) => map?]
 
    (reduce #(prune-ident %1 %2 ident)
-           (state-after-top-level-ident-dissoc state-map ident)
-           (entity-path-value-map-after-top-level-dissoc state-map ident))))
+     (state-after-top-level-ident-dissoc state-map ident)
+     (entity-path-value-map-after-top-level-dissoc state-map ident))))
+
+(declare remove-entity-tk*)
+
+(defn- cascade-delete*
+  [state-map starting-entity cascade]
+  (reduce
+    (fn [s edge]
+      (if (every? eql/ident? edge)
+        (reduce (fn [s2 ident] (remove-entity-tk* s ident cascade)) s edge)
+        (remove-entity-tk* s edge cascade)))
+    state-map
+    (set/intersection (set cascade) (set (keys starting-entity)))))
+
+(>defn remove-entity-tk*
+  [state-map ident cascade]
+  (let [tables                  (keep (fn [k]
+                                        (let [candidate (get state-map k)]
+                                          (when (and (map? candidate) (every? map? (vals candidate)))
+                                            k))) (keys state-map))
+        remove-idents-at-path   (fn [state-map path]
+                                  (let [v (get-in state-map path)]
+                                    (if (or (eql/ident? v) (every? eql/ident? v))
+                                      (merge/remove-ident* state-map ident path)
+                                      state-map)))
+        candidate-paths         (fn [state-map top-key]     ; allow top-key to be nil to "mean" root node
+                                  (map (fn [k]
+                                         (if top-key
+                                           [top-key k]
+                                           [k])) (keys (get state-map top-key))))
+        remove-ident-from-table (fn [state-map table]
+                                  (reduce
+                                    remove-idents-at-path
+                                    state-map
+                                    (candidate-paths state-map table)))
+        state-without-entity    (->
+                                  ;; remove the pointers to the entity
+                                  (reduce remove-ident-from-table state-map tables)
+                                  ;; remove the top-level edges that point to the entity
+                                  (remove-ident-from-table nil)
+                                  ;; remove the entity
+                                  (dissoc-in ident))
+        target-entity           (get-in state-map ident)
+        final-state             (cascade-delete* state-without-entity target-entity cascade)]
+
+    ))
 
 
 (comment
@@ -364,7 +410,7 @@
                       :state (atom {:person/id {1
                                                 {:person/id 1 :person/name "Dad"}}})}]
     (apply swap! (:state mutation-env) update-in (:ref mutation-env)
-           (vector assoc :person/name "Mom")))
+      (vector assoc :person/name "Mom")))
 
 
 
@@ -372,7 +418,7 @@
                       :state (atom {:person/id {1
                                                 {:person/id 1 :person/name "Dad"}}})}]
     (update-caller! mutation-env
-                    assoc :person/name "Mom"))
+      assoc :person/name "Mom"))
 
 
 
@@ -404,13 +450,13 @@
 
 (comment
 
-  (let [state (atom {:person/id {1 {:person/id 1 :person/name "Dad"
+  (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
                                     :person/children [[:person/id 2] [:person/id 3]]}
                                  2 {:person/id 2 :person/name "Son"}
                                  3 {:person/id 3 :person/name "Daughter"}}})
-        ref [:person/id 1]
-        path (tree-path->db-path @state (into ref [:person/id 2]))
-        args (vector assoc :person/name "Mom")]
+        ref   [:person/id 1]
+        path  (tree-path->db-path @state (into ref [:person/id 2]))
+        args  (vector assoc :person/name "Mom")]
 
     (if (and path (get-in @state path))
       (apply swap! state update-in path args)
@@ -420,13 +466,13 @@
 
 
 
-  (let [state (atom {:person/id {1 {:person/id 1 :person/name "Dad"
+  (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
                                     :person/children [[:person/id 2] [:person/id 3]]}
                                  2 {:person/id 2 :person/name "Son"}
                                  3 {:person/id 3 :person/name "Daughter"}}})
-        ref [:person/id 1]
-        path (tree-path->db-path @state (into ref [:person/id 2]))
-        args (vector assoc :person/name "Mom")]
+        ref   [:person/id 1]
+        path  (tree-path->db-path @state (into ref [:person/id 2]))
+        args  (vector assoc :person/name "Mom")]
 
     (and path (get-in @state path)))
 
@@ -463,7 +509,7 @@
      [mutation-env & forms]
      `(swap! (:state ~mutation-env) (fn [s#]
                                       (-> s#
-                                          ~@forms)))))
+                                        ~@forms)))))
 
 
 
