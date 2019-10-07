@@ -247,8 +247,7 @@
                                   (dissoc-in ident))
         target-entity           (get-in state-map ident)
         final-state             (cascade-delete* state-without-entity target-entity cascade)]
-
-    ))
+    final-state))
 
 
 (comment
