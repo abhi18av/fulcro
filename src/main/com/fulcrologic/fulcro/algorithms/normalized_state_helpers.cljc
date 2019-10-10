@@ -160,7 +160,7 @@
                                      (let [vl (clojure.core/get-in state a-path)]
                                        (if (coll? vl)
                                          (or
-                                           (some #{ident} vl )
+                                           (some #{ident} vl)
                                            (= ident vl))
                                          (= ident (take 2 a-path)))))
                                    (normalized-paths state)))
@@ -204,29 +204,126 @@
 ;;================================
 
 (>defn remove-edge*
+  "Remove the given edge at the given path. Also scans all tables and removes any to-one or to-many idents that are
+  found that match `edge` (removes dangling pointers to the removed entity(ies).
+
+  The optional `cascade` parameter is a set of keywords that represent edges that should cause recursive deletes
+  (i.e. it indicates edge names that *own* something, indicating it is safe to remove those entities as well).
+
+  Returns the new state map with the entity(ies) removed."
+
   ([state-map path-to-edge]
    [map? vector? => any?]
    (remove-edge* state-map path-to-edge #{}))
 
-  ;; TODO implement cascading
+
   ([state-map path-to-edge cascade]
    [map? vector? (s/coll-of keyword? :kind set?) => map?]
-   (let []
-     (if (eql/ident? (clojure.core/get-in state-map path-to-edge))
-       (assoc-in state-map path-to-edge {})
-       state-map))))
+   (let [candidate (let [vl (clojure.core/get-in state-map path-to-edge)]
+                     (cond
+                       (eql/ident? vl) [vl]
+                       (every? eql/ident? vl) vl))
+         final-state (if (some #{path-to-edge} (normalized-paths state-map))
+                       (reduce
+                         #(remove-entity* %1 %2 cascade)
+                         state-map
+                         candidate)
+                       state-map)]
+     final-state)))
 
 
 (comment
 
-  (def state {:fastest-car    [:car/id 1]
-              :favourite-cars [[:car/id 1] [:car/id 2]]
-              :car/id         {1 {:registered-owner [:person/id 1]}}
-              :person/id      {1 {:age               42
-                                  :address           [:address/id 1]
-                                  :alternate-address [:address/id 2]}}
-              :address/id     {1 {:address/state "Oregon"}
-                               2 {:address/state "Idaho"}}})
+  (let [state {:fastest-car    [:car/id 1]
+               :denorm         {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                                    :b [:person/id 1]}}}
+               :favourite-cars [[:car/id 1] [:car/id 2]]
+               :car/id         {1 {:car/registered-owner [:person/id 1]}
+                                2 {:car/registered-owner [:person/id 1]}}
+               :person/id      {1 {:person/age        42
+                                   :person/cars       [[:car/id 1] [:car/id 2]]
+                                   :person/address    [:address/id 1]
+                                   :alternate-address [:address/id 2]}}
+               :address/id     {1 {:address/state "Oregon"}
+                                2 {:address/state "Idaho"}}}]
+
+    ;(normalized-paths state)
+
+    ;;DONE
+    ;"Refuses to remove a denormalized edge"
+    ;(remove-edge* state [:denorm :level-1 :level2 :b])      ;=> state
+    ;;DONE
+    ;"Removes top-level to-one edge"
+    ;(remove-edge* state [:fastest-car])                     ;=> nil
+    ;;DONE
+    ;"Removes top-level to-many edge"
+    ;(remove-edge* state [:favourite-cars])                  ;=> nil
+    ;;DONE
+    ;"Removes table-nested to-one edge"
+    ;(remove-edge* state [:person/id 1 :person/address])     ;=> nil
+    ;;DONE
+    ;"Removes table-nested to-many edge"
+    ;(remove-edge* state [:person/id 1 :person/cars])        ;=> nil
+    )
+
+
+
+
+  (let [state {:person/id      {1 {:person/id   1
+                                   :latest-car  [:car/id 2]
+                                   :person/cars [[:car/id 1] [:car/id 2]]}
+                                2 {:person/id 2}}
+               :fastest-car    [:car/id 1]
+               :favourite-cars [[:car/id 1] [:car/id 2]]
+               :car/id         {1 {:car/id     1
+                                   :car/engine [:engine/id 1]}
+                                2 {:car/id     2
+                                   :car/engine [:engine/id 2]}}
+               :engine/id      {1 {:engine/id 1}
+                                2 {:engine/id 2}}}]
+    ;;DONE
+    ;"Removes top-level to-one edge"
+    ;(remove-edge* state [:fastest-car] #{:car/engine})  ;=> true
+    ;;DONE
+    ;"Removes top-level to-many edge"
+    ;(remove-edge* state [:favourite-cars] #{:car/engine}) ;=> true
+    ;;DONE
+    ;"Removes table-nested to-one edge"
+    ;(remove-edge* state [:person/id 1 :latest-car] #{:car/engine}) ;=> true
+    ;;DONE
+    ;"Removes table-nested to-many edge"
+    ;(remove-edge* state [:person/id 1 :person/cars] #{:car/engine}) ;=> true
+    )
+
+
+
+
+  (let [state {:person/id      {1 {:person/id   1
+                                   :latest-car  [:car/id 2]
+                                   :person/cars [[:car/id 1] [:car/id 2]]}}
+               :fastest-car    [:car/id 1]
+               :favourite-cars [[:car/id 1] [:car/id 2]]
+               :car/id         {1 {:car/id     1
+                                   :car/colors [[:color/id 1]]}
+                                2 {:car/id     2
+                                   :car/colors [[:color/id 1]
+                                                [:color/id 2]]}}
+               :color/id       {1 {:color/id 1}
+                                2 {:color/id 2}}}]
+
+    ;;DONE
+    ;"Removes top-level to-one edge"
+    ;(remove-edge* state [:fastest-car] #{:car/colors})      ;=> true
+    ;;DONE
+    ;"Removes top-level to-many edge"
+    ;(remove-edge* state [:favourite-cars] #{:car/colors}) ;=> true
+    ;;DONE
+    ;"Removes table-nested to-one edge"
+    ;(remove-edge* state [:person/id 1 :latest-car] #{:car/colors}) ;=> true
+    ;;DONE
+    ;"Removes table-nested to-many edge"
+    ;(remove-edge* state [:person/id 1 :person/cars] #{:car/colors}) ;=> true
+    )
 
 
   '())
@@ -331,9 +428,9 @@
                                     :person/children [[:person/id 2] [:person/id 3]]}
                                  2 {:person/id 2 :person/name "Son"}
                                  3 {:person/id 3 :person/name "Daughter"}}})
-        ref   [:person/id 1]
-        path  (tree-path->db-path @state (into ref [:person/id 2]))
-        args  (vector assoc :person/name "Mom")]
+        ref [:person/id 1]
+        path (tree-path->db-path @state (into ref [:person/id 2]))
+        args (vector assoc :person/name "Mom")]
 
     (if (and path (get-in @state path))
       (apply swap! state update-in path args)
@@ -347,9 +444,9 @@
                                     :person/children [[:person/id 2] [:person/id 3]]}
                                  2 {:person/id 2 :person/name "Son"}
                                  3 {:person/id 3 :person/name "Daughter"}}})
-        ref   [:person/id 1]
-        path  (tree-path->db-path @state (into ref [:person/id 2]))
-        args  (vector assoc :person/name "Mom")]
+        ref [:person/id 1]
+        path (tree-path->db-path @state (into ref [:person/id 2]))
+        args (vector assoc :person/name "Mom")]
 
     (and path (get-in @state path)))
 
@@ -389,8 +486,8 @@
 (comment
   (def env {:state (atom {})})
   (swap!-> env
-               (assoc :x 1)
-               (update :x inc))
+           (assoc :x 1)
+           (update :x inc))
   (assoc :x 1)
   (update :x inc))
 

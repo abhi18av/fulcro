@@ -88,7 +88,7 @@
                                                         :person/children [{:person/id 2 :person/name "Son"}
                                                                           {:person/id 3 :person/name "Daughter"}]}))))
 
-(specification "remove-entity*" :focus
+(specification "remove-entity*"
   (behavior "Without cascading"
     (let [denorm-data {:a [[:person/id 1] [:person/id 2]]
                        :b [:person/id 1]}
@@ -192,64 +192,151 @@
                  :denorm         {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
                                                       :b [:person/id 1]}}}
                  :favourite-cars [[:car/id 1] [:car/id 2]]
-                 :car/id         {1 {:registered-owner [:person/id 1]}
-                                  2 {:registered-owner [:person/id 1]}}
-                 :person/id      {1 {:age               42
+                 :car/id         {1 {:car/registered-owner [:person/id 1]}
+                                  2 {:car/registered-owner [:person/id 1]}}
+                 :person/id      {1 {:person/age        42
                                      :person/cars       [[:car/id 1] [:car/id 2]]
-                                     :address           [:address/id 1]
+                                     :person/address    [:address/id 1]
                                      :alternate-address [:address/id 2]}}
                  :address/id     {1 {:address/state "Oregon"}
                                   2 {:address/state "Idaho"}}}]
       (assertions
+
 
         "Refuses to remove a denormalized edge"
         (nsh/remove-edge* state [:denorm :level-1 :level2 :b]) => state
 
         "Removes top-level to-one edge"
-        (-> (nsh/remove-edge* state [:fastest-car])
-            (get-in [:fastest-car])) => nil
+        (let [new-state (nsh/remove-edge* state [:fastest-car])]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:fastest-car])))) => []
 
         "Removes top-level to-many edge"
-        (-> (nsh/remove-edge* state [:favourite-cars])
-            (get-in [:favourite-cars])) => nil
+        (let [new-state (nsh/remove-edge* state [:favourite-cars])]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:favourite-cars])))) => []
 
         "Removes table-nested to-one edge"
-        (-> (nsh/remove-edge* state [:car/id 1 :car/engine])
-            (get-in [:person/id 1 :person/cars])) => nil
+        (let [new-state (nsh/remove-edge* state [:person/id 1 :person/address])]
+          (-> (or
+                (get-in new-state [:address/id 1])
+                (get-in new-state [:person/id 1 :person/address])))) => nil
 
         "Removes table-nested to-many edge"
-        (-> (nsh/remove-edge* state [:car/id 1 :car/engine])
-            (get-in [:car/id 1 :car/engine])) => {}
-        )))
+        (let [new-state (nsh/remove-edge* state [:person/id 1 :person/cars])]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:person/id 1 :person/cars])))) => [])))
 
-  (behavior "With cascading, non-recursive edge removal"
-    (let [state {:fastest-car    [:car/id 1]
-                 :denorm         {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
-                                                      :b [:person/id 1]}}}
+  (behavior "With to-one cascaded edge removal"
+    (let [state {:person/id      {1 {:person/id   1
+                                     :latest-car  [:car/id 2]
+                                     :person/cars [[:car/id 1] [:car/id 2]]}
+                                  2 {:person/id 2}}
+                 :fastest-car    [:car/id 1]
                  :favourite-cars [[:car/id 1] [:car/id 2]]
-                 :car/id         {1 {:registered-owner [:person/id 1]}
-                                  2 {:registered-owner [:person/id 1]}}
-                 :person/id      {1 {:age               42
-                                     :person/cars       [[:car/id 1] [:car/id 2]]
-                                     :address           [:address/id 1]
-                                     :alternate-address [:address/id 2]}}
-                 :address/id     {1 {:address/state "Oregon"}
-                                  2 {:address/state "Idaho"}}}]
+                 :car/id         {1 {:car/id     1
+                                     :car/engine [:engine/id 1]}
+                                  2 {:car/id     2
+                                     :car/engine [:engine/id 2]}}
+                 :engine/id      {1 {:engine/id 1}
+                                  2 {:engine/id 2}}}]
 
       (assertions
-        "Can cascade a delete across named to-one edge"
-        (-> (nsh/remove-edge* state [:car/id 1 :registered-owner] #{:alternate-address})
-            (get-in [:address/id 2])
-            nil?) => true)
+
+        "Removes top-level to-one edge"
+        (let [new-state (nsh/remove-edge* state [:fastest-car] #{:car/engine})]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:engine/id 1]))
+              nil?)) => true
+
+
+        "Removes top-level to-many edge"
+        (let [new-state (nsh/remove-edge* state [:favourite-cars] #{:car/engine})]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:engine/id 1])
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:engine/id 2]))
+              nil?)) => true
+
+
+        "Removes table-nested to-one edge"
+        (let [new-state (nsh/remove-edge* state [:person/id 1 :latest-car] #{:car/engine})]
+          (-> (or
+                (get-in new-state [:engine/id 2])
+                (get-in new-state [:car/id 2]))
+              nil?)) => true
+
+
+        "Removes table-nested to-many edge"
+        (let [new-state (nsh/remove-edge* state [:person/id 1 :person/cars] #{:car/engine})]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:engine/id 1])
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:engine/id 2]))
+              nil?)) => true)))
+
+
+  (behavior "With to-many cascaded edge removal"
+    (let [state {:person/id      {1 {:person/id   1
+                                     :latest-car  [:car/id 2]
+                                     :person/cars [[:car/id 1] [:car/id 2]]}}
+                 :fastest-car    [:car/id 1]
+                 :favourite-cars [[:car/id 1] [:car/id 2]]
+                 :car/id         {1 {:car/id     1
+                                     :car/colors [[:color/id 1]]}
+                                  2 {:car/id     2
+                                     :car/colors [[:color/id 1]
+                                                  [:color/id 2]]}}
+                 :color/id       {1 {:color/id 1}
+                                  2 {:color/id 2}}}]
 
       (assertions
-        "Can cascade a delete across named to-one edge"
-        (-> (nsh/remove-edge* state [:person/id 1 :alternate-address] #{:alternate-address})
-            (get-in [:address/id 1])) => {:address/state "Oregon"})
 
-      ;; TODO to-many with cascading,
+        "Removes top-level to-one edge"
+        (let [new-state (nsh/remove-edge* state [:fastest-car] #{:car/colors})]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:color/id 1]))
+              nil?)) => true
 
-      )))
+
+        "Removes top-level to-many edge"
+        (let [new-state (nsh/remove-edge* state [:favourite-cars] #{:car/colors})]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:color/id 1])
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:color/id 2]))
+              nil?)) => true
+
+
+        "Removes table-nested to-one edge"
+        (let [new-state (nsh/remove-edge* state [:person/id 1 :latest-car] #{:car/colors})]
+          (-> (or
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:color/id 1])
+                (get-in new-state [:color/id 2]))
+              nil?)) => true
+
+
+        "Removes table-nested to-many edge"
+        (let [new-state (nsh/remove-edge* state [:person/id 1 :person/cars] #{:car/colors})]
+          (-> (or
+                (get-in new-state [:car/id 1])
+                (get-in new-state [:color/id 1])
+                (get-in new-state [:car/id 2])
+                (get-in new-state [:color/id 2]))
+              nil?)) => true)))
+
+  )
 
 ;;============================================================================
 
