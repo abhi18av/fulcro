@@ -155,10 +155,15 @@
                                      (every? eql/ident? v) (merge/remove-ident* state1 ident path)
                                      :else state1)))
 
-         candidate-paths (fn [state1 table-name]
+         candidate-paths (fn [state table-name]
                            (filter (fn [a-path]
-                                     (= table-name (first a-path)))
-                                   (normalized-paths state1)))
+                                     (let [vl (clojure.core/get-in state a-path)]
+                                       (if (coll? vl)
+                                         (or
+                                           (some #{ident} vl )
+                                           (= ident vl))
+                                         (= ident (take 2 a-path)))))
+                                   (normalized-paths state)))
 
          remove-ident-from-table (fn [state1 table]
                                    (reduce

@@ -88,7 +88,7 @@
                                                         :person/children [{:person/id 2 :person/name "Son"}
                                                                           {:person/id 3 :person/name "Daughter"}]}))))
 
-(specification "remove-entity*"
+(specification "remove-entity*" :focus
   (behavior "Without cascading"
     (let [denorm-data {:a [[:person/id 1] [:person/id 2]]
                        :b [:person/id 1]}
@@ -116,8 +116,11 @@
         (-> (nsh/remove-entity* state [:person/id 1])
             (nsh/get-in [:denorm :level-1 :level-2])) => denorm-data
         "Removes table-nested to-one references"
-        (-> (nsh/remove-entity* state [:email/id 1])
-            (nsh/get-in [:person/id 1 :person/email]) nil?) => true
+        (let [new-state (nsh/remove-entity* state [:email/id 1])]
+          (-> (or
+                (clojure.core/get-in new-state [:person/id 1 :person/email])
+                (nsh/get-in new-state [:person/id 1 :person/email]))
+              nil?)) => true
         "Removes table-nested to-many refs"
         (-> (nsh/remove-entity* state [:car/id 1])
             (nsh/get-in [:person/id 1 :person/cars])) => [[:car/id 2]])))
@@ -135,23 +138,28 @@
                  :email/id  {1 {:email/id 1}}}]
       (assertions
         "Removes a single, to-one and non-recursive cascased entity"
-        (-> (nsh/remove-entity* state [:person/id 1] #{:person/email})
-            (get [:email/id 1])
-            nil?) => true
+        (let [new-state (nsh/remove-entity* state [:person/id 1] #{:person/email})]
+          (->
+            (or
+              (nsh/get-in new-state [:person/id 1])
+              (nsh/get-in new-state [:email/id 1]))
+            nil?)) => true
 
         "Removes a single, to-many and non-recursive cascased entity"
         (let [new-state (nsh/remove-entity* state [:person/id 1] #{:person/cars})]
-          (and
-            (get new-state [:car/id 1])
-            (get new-state [:car/id 2]))) => nil
+          (or
+            (nsh/get-in new-state [:person/id 1])
+            (nsh/get-in new-state [:car/id 1])
+            (nsh/get-in new-state [:car/id 2]))) => nil
 
         "Removes multiple, to-one and non-recursive cascased entity"
         (let [new-state (nsh/remove-entity* state [:person/id 1]
                                             #{:person/email :person/cars})]
-          (and
-            (get new-state [:email/id 1])
-            (get new-state [:car/id 1])
-            (get new-state [:car/id 2]))) => nil)))
+          (or
+            (nsh/get-in new-state [:person/id 1])
+            (nsh/get-in new-state [:email/id 1])
+            (nsh/get-in new-state [:car/id 1])
+            (nsh/get-in new-state [:car/id 2]))) => nil)))
 
   (behavior "With cascading, recursive behavior"
     (let [state {:person/id {1 {:person/id       1
@@ -164,12 +172,14 @@
       (assertions
         "Removes a single, to-many cascased entities"
         (let [new-state (nsh/remove-entity* state [:person/id 1] #{:person/children})]
-          (get new-state [:person/id 3])) => nil
+          (or
+            (nsh/get-in new-state [:person/id 1])
+            (nsh/get-in new-state [:person/id 3]))) => nil
 
         "Removes multiple, to-many cascased entities"
         (let [new-state (nsh/remove-entity* state [:person/id 1]
                                             #{:person/children :person/spouse})]
-          (and
+          (or
             (get new-state [:person/id 2])
             (get new-state [:person/id 3]))) => nil))))
 
