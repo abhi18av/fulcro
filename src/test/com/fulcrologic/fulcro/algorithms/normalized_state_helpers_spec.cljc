@@ -107,17 +107,20 @@
       (assertions
         "Removes the entity itself from the database"
         (-> (nsh/remove-entity* state [:person/id 1])
-            (get-in [:person/id 1])) => nil
+            (nsh/get-in [:person/id 1])) => nil
         "Removes top-level to-one references"
         (-> (nsh/remove-entity* state [:car/id 1]) :fastest-car) => []
         "Removes top-level to-many refs"
         (-> (nsh/remove-entity* state [:person/id 1]) :grandparents) => [[:person/id 2]]
         "Ignores denormalized data"
-        (-> (nsh/remove-entity* state [:person/id 1]) (get-in [:denorm :level-1 :level-2])) => denorm-data
+        (-> (nsh/remove-entity* state [:person/id 1])
+            (nsh/get-in [:denorm :level-1 :level-2])) => denorm-data
         "Removes table-nested to-one references"
-        (-> (nsh/remove-entity* state [:email/id 1]) (get-in [:person/id 1 :person/email]) nil?) => true
+        (-> (nsh/remove-entity* state [:email/id 1])
+            (nsh/get-in [:person/id 1 :person/email]) nil?) => true
         "Removes table-nested to-many refs"
-        (-> (nsh/remove-entity* state [:car/id 1]) (get-in [:person/id 1 :person/cars])) => [[:car/id 2]])))
+        (-> (nsh/remove-entity* state [:car/id 1])
+            (nsh/get-in [:person/id 1 :person/cars])) => [[:car/id 2]])))
 
 
 

@@ -164,7 +164,7 @@
                                    (reduce
                                      remove-idents-at-path
                                      state1
-                                     (concat (candidate-paths state1 :person/id) non-tables)))
+                                     (concat (candidate-paths state1 (first ident)) non-tables)))
 
          state-without-entity (->
                                 ;; remove the (non) table-nested pointers to the entity
