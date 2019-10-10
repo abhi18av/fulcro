@@ -200,3 +200,197 @@
                                         cascade))]
 
      final-state)))
+
+;;================================
+
+(>defn remove-edge*
+  ([state-map path-to-edge]
+   [map? vector? => any?]
+   (remove-edge* state-map path-to-edge #{}))
+
+  ;; TODO implement cascading
+  ([state-map path-to-edge cascade]
+   [map? vector? (s/coll-of keyword? :kind set?) => map?]
+   (let []
+     (if (eql/ident? (clojure.core/get-in state-map path-to-edge))
+       (assoc-in state-map path-to-edge {})
+       state-map))))
+
+
+(comment
+
+  (def state {:fastest-car    [:car/id 1]
+              :favourite-cars [[:car/id 1] [:car/id 2]]
+              :car/id         {1 {:registered-owner [:person/id 1]}}
+              :person/id      {1 {:age               42
+                                  :address           [:address/id 1]
+                                  :alternate-address [:address/id 2]}}
+              :address/id     {1 {:address/state "Oregon"}
+                               2 {:address/state "Idaho"}}})
+
+
+  '())
+
+
+
+;;============================================================================
+
+;; TODO clarify the exact usage
+(>defn sort-idents-by
+  "
+  Intended to be used as
+   ```
+   (sort-idents-by :entity/field vector-of-idents)
+   ```
+  Can facilitate:
+  ```
+  (swap! state update-in [:entity 1 :list] sort-idents-by :list/field)
+  ```
+  "
+  [entity-field vector-of-idents]
+  [keyword? vector? => any?]
+  (sort-by second vector-of-idents))
+
+(comment
+
+  (def state (atom {:grandparents [[:person/id 3] [:person/id 2]]
+                    :person/id    {1 {:person/name     "person-1"
+                                      :person/children [[:person/id 3]
+                                                        [:person/id 9]
+                                                        [:person/id 5]]}
+                                   2 {:person/name "person-2"
+                                      :person/cars [[:car/id 1]
+                                                    [:car/id 2]]}}
+                    :car/id       {1 {:car/model "model-1"}
+                                   2 {:car/model "model-2"}}}))
+
+
+  (sort-by second (clojure.core/get-in @state [:person/id 1 :person/children]))
+
+  (swap! state update-in [:person/id 1 :person/children] sort-idents-by :person/id)
+
+  '())
+
+
+;============================================================================
+
+;;MAYBE These might belong in mutation ns???
+(defn update-caller!
+  "Runs clojure.core/update on the table entry in the state database that corresponds
+   to the mutation caller (which can be explicitly set via `:ref` when calling `transact!`).
+   Equivalent to `(swap! (:state env) update-in (:ref env) ...)`."
+  [{:keys [state ref] :as mutation-env} & args]
+  (apply swap! state update-in ref args))
+
+
+(comment
+
+
+  (let [mutation-env {:ref   [:person/id 1]
+                      :state (atom {:person/id {1
+                                                {:person/id 1 :person/name "Dad"}}})}]
+    (apply swap! (:state mutation-env) update-in (:ref mutation-env)
+           (vector assoc :person/name "Mom")))
+
+
+
+  (let [mutation-env {:ref   [:person/id 1]
+                      :state (atom {:person/id {1
+                                                {:person/id 1 :person/name "Dad"}}})}]
+    (update-caller! mutation-env
+                    assoc :person/name "Mom"))
+
+
+
+
+  '())
+
+;============================================================================
+
+;;MAYBE These might belong in mutation ns???
+(defn update-caller-in!
+  "Like swap! but starts at the ref from `env`, adds in supplied `path` elements
+  (resolving across idents if necessary). Finally runs an update-in on that resultant
+  path with the given `args`.
+   Roughly equivalent to:
+   ```
+   (swap! (:state env) update-in (tree-path->db-path @state (into (:ref env) path)) args)
+   ```
+   with a small bit of additional sanity checking."
+  [{:keys [state ref] :as mutation-env} path & args]
+  (let [path (tree-path->db-path @state (into ref path))]
+    (if (and path (get-in @state path))
+      (apply swap! state update-in path args)
+      @state)))
+
+
+
+(comment
+
+  (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
+                                    :person/children [[:person/id 2] [:person/id 3]]}
+                                 2 {:person/id 2 :person/name "Son"}
+                                 3 {:person/id 3 :person/name "Daughter"}}})
+        ref   [:person/id 1]
+        path  (tree-path->db-path @state (into ref [:person/id 2]))
+        args  (vector assoc :person/name "Mom")]
+
+    (if (and path (get-in @state path))
+      (apply swap! state update-in path args)
+      @state))
+
+
+
+
+
+  (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
+                                    :person/children [[:person/id 2] [:person/id 3]]}
+                                 2 {:person/id 2 :person/name "Son"}
+                                 3 {:person/id 3 :person/name "Daughter"}}})
+        ref   [:person/id 1]
+        path  (tree-path->db-path @state (into ref [:person/id 2]))
+        args  (vector assoc :person/name "Mom")]
+
+    (and path (get-in @state path)))
+
+
+
+
+  ;;;;;
+
+
+  '())
+
+;============================================================================
+
+;; TODO: Untested...make up an env with a state atom and see if it works in clj/cljs
+
+#?(:clj
+   (defmacro swap!->
+     "A macro that is equivalent to:
+     ```
+     (swap! (:state env) (fn [s] (-> s ...forms...)))
+     ```
+     E.g.
+     ```
+     (swap!-> env
+       (merge/merge-component ...)
+       (integrate-ident* ...))
+     ```
+     "
+     [mutation-env & forms]
+     `(swap! (:state ~mutation-env) (fn [s#]
+                                      (-> s#
+                                          ~@forms)))))
+
+
+
+
+(comment
+  (def env {:state (atom {})})
+  (swap!-> env
+               (assoc :x 1)
+               (update :x inc))
+  (assoc :x 1)
+  (update :x inc))
+

@@ -1,6 +1,6 @@
 (ns com.fulcrologic.fulcro.algorithms.normalized-state-helpers-spec
   (:require
-    [fulcro-spec.core :refer [assertions specification component when-mocking behavior =>]]
+    [fulcro-spec.core :refer [assertions specification component when-mocking behavior]]
     [com.fulcrologic.fulcro.components :as comp :refer [defsc]]
     [com.fulcrologic.fulcro.algorithms.normalized-state-helpers :as nsh]))
 
@@ -183,3 +183,83 @@
             (get new-state [:person/id 2])
             (get new-state [:person/id 3]))) => nil))))
 
+;;==========================
+
+(specification "remove-edge*" :focus
+
+  (behavior "Without cascading"
+    (let [state {:fastest-car    [:car/id 1]
+                 :denorm         {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                                      :b [:person/id 1]}}}
+                 :favourite-cars [[:car/id 1] [:car/id 2]]
+                 :car/id         {1 {:registered-owner [:person/id 1]}
+                                  2 {:registered-owner [:person/id 1]}}
+                 :person/id      {1 {:age               42
+                                     :person/cars       [[:car/id 1] [:car/id 2]]
+                                     :address           [:address/id 1]
+                                     :alternate-address [:address/id 2]}}
+                 :address/id     {1 {:address/state "Oregon"}
+                                  2 {:address/state "Idaho"}}}]
+      (assertions
+
+        "Refuses to remove a denormalized edge"
+        (nsh/remove-edge* state [:denorm :level-1 :level2 :b]) => state
+
+        "Removes top-level to-one edge"
+        (-> (nsh/remove-edge* state [:fastest-car])
+            (get-in [:fastest-car])) => nil
+
+        "Removes top-level to-many edge"
+        (-> (nsh/remove-edge* state [:favourite-cars])
+            (get-in [:favourite-cars])) => nil
+
+        "Removes table-nested to-one edge"
+        (-> (nsh/remove-edge* state [:car/id 1 :car/engine])
+            (get-in [:person/id 1 :person/cars])) => nil
+
+        "Removes table-nested to-many edge"
+        (-> (nsh/remove-edge* state [:car/id 1 :car/engine])
+            (get-in [:car/id 1 :car/engine])) => {}
+        )))
+
+  (behavior "With cascading, non-recursive edge removal"
+    (let [state {:fastest-car    [:car/id 1]
+                 :denorm         {:level-1 {:level-2 {:a [[:person/id 1] [:person/id 2]]
+                                                      :b [:person/id 1]}}}
+                 :favourite-cars [[:car/id 1] [:car/id 2]]
+                 :car/id         {1 {:registered-owner [:person/id 1]}
+                                  2 {:registered-owner [:person/id 1]}}
+                 :person/id      {1 {:age               42
+                                     :person/cars       [[:car/id 1] [:car/id 2]]
+                                     :address           [:address/id 1]
+                                     :alternate-address [:address/id 2]}}
+                 :address/id     {1 {:address/state "Oregon"}
+                                  2 {:address/state "Idaho"}}}]
+
+      (assertions
+        "Can cascade a delete across named to-one edge"
+        (-> (nsh/remove-edge* state [:car/id 1 :registered-owner] #{:alternate-address})
+            (get-in [:address/id 2])
+            nil?) => true)
+
+      (assertions
+        "Can cascade a delete across named to-one edge"
+        (-> (nsh/remove-edge* state [:person/id 1 :alternate-address] #{:alternate-address})
+            (get-in [:address/id 1])) => {:address/state "Oregon"})
+
+      ;; TODO to-many with cascading,
+
+      )))
+
+;;============================================================================
+
+(specification "sort-idents-by")
+
+;;============================================================================
+(specification "update-caller!")
+
+;;============================================================================
+(specification "update-caller-in!")
+
+;;============================================================================
+(specification "swap!->")
