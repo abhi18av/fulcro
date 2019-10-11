@@ -183,7 +183,6 @@
             (get new-state [:person/id 2])
             (get new-state [:person/id 3]))) => nil))))
 
-;;==========================
 
 (specification "remove-edge*"
 
