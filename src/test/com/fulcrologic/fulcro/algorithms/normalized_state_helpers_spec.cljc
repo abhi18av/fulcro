@@ -206,6 +206,9 @@
         "Refuses to remove a denormalized edge"
         (nsh/remove-edge* state [:denorm :level-1 :level2 :b]) => state
 
+        "Refuses to remove a non-edge"
+        (nsh/remove-edge* state [:person/id 1 :person/age]) => state
+
         "Removes top-level to-one edge"
         (let [new-state (nsh/remove-edge* state [:fastest-car])]
           (-> (or

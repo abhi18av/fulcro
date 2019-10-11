@@ -220,9 +220,11 @@
   ([state-map path-to-edge cascade]
    [map? vector? (s/coll-of keyword? :kind set?) => map?]
    (let [candidate (let [vl (clojure.core/get-in state-map path-to-edge)]
-                     (cond
-                       (eql/ident? vl) [vl]
-                       (every? eql/ident? vl) vl))
+                     (if-not (vector? vl)
+                       nil
+                      (cond
+                        (eql/ident? vl) [vl]
+                        (every? eql/ident? vl) vl)))
          final-state (if (some #{path-to-edge} (normalized-paths state-map))
                        (reduce
                          #(remove-entity* %1 %2 cascade)
@@ -248,7 +250,11 @@
                                 2 {:address/state "Idaho"}}}]
 
     ;(normalized-paths state)
-
+    ;;NOTE passes here since strings are `seq` of chars
+    (remove-edge* state [:address/id 1 :address/state])      ;=> state
+    ;;NOTE fails with numbers
+    ;(remove-edge* state [:person/id 1 :person/age])      ;=> state
+    ;;;;;
     ;;DONE
     ;"Refuses to remove a denormalized edge"
     ;(remove-edge* state [:denorm :level-1 :level2 :b])      ;=> state
