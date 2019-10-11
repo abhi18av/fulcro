@@ -234,9 +234,6 @@
 
 
 
-;;============================================================================
-
-
 (>defn sort-idents-by
   "Intended to be used as
    ```
@@ -256,11 +253,12 @@
 
 ;============================================================================
 
-;;MAYBE These might belong in mutation ns???
 (defn update-caller!
   "Runs clojure.core/update on the table entry in the state database that corresponds
    to the mutation caller (which can be explicitly set via `:ref` when calling `transact!`).
+
    Equivalent to `(swap! (:state env) update-in (:ref env) ...)`."
+
   [{:keys [state ref] :as mutation-env} & args]
   (apply swap! state update-in ref args))
 
@@ -269,34 +267,34 @@
 
 
   (let [mutation-env {:ref   [:person/id 1]
-                      :state (atom {:person/id {1
-                                                {:person/id 1 :person/name "Dad"}}})}]
-    (apply swap! (:state mutation-env) update-in (:ref mutation-env)
-           (vector assoc :person/name "Mom")))
-
-
-
-  (let [mutation-env {:ref   [:person/id 1]
-                      :state (atom {:person/id {1
-                                                {:person/id 1 :person/name "Dad"}}})}]
+                      :state (atom {:person/id {1 {:person/id   1
+                                                   :latest-car  [:car/id 2]
+                                                   :person/cars [[:car/id 1] [:car/id 2]]}}})}]
+    #_(update-caller! mutation-env
+                      assoc-in [:latest-car] [:car/id 3])
     (update-caller! mutation-env
-                    assoc :person/name "Mom"))
+                    dissoc :latest-car)
+    #_(update-caller! mutation-env
+                      assoc :person/age 42)
+    #_(update-caller! mutation-env
+                      assoc :person/name "James Bond"))
 
 
   '())
 
 ;============================================================================
 
-;;MAYBE These might belong in mutation ns???
 (defn update-caller-in!
   "Like swap! but starts at the ref from `env`, adds in supplied `path` elements
   (resolving across idents if necessary). Finally runs an update-in on that resultant
   path with the given `args`.
-   Roughly equivalent to:
+
+   Equivalent to:
    ```
    (swap! (:state env) update-in (tree-path->db-path @state (into (:ref env) path)) args)
    ```
    with a small bit of additional sanity checking."
+
   [{:keys [state ref] :as mutation-env} path & args]
   (let [path (tree-path->db-path @state (into ref path))]
     (if (and path (get-in @state path))
@@ -306,6 +304,27 @@
 
 
 (comment
+
+  (let [mutation-env {:ref   [:person/id 1]
+                      :state (atom {:person/id      {1 {:person/id   1
+                                                        :latest-car  [:car/id 2]
+                                                        :person/cars [[:car/id 1] [:car/id 2]]}}
+                                    :fastest-car    [:car/id 1]
+                                    :favourite-cars [[:car/id 1] [:car/id 2]]
+                                    :car/id         {1 {:car/id     1
+                                                        :car/colors [[:color/id 1]]}
+                                                     2 {:car/id     2
+                                                        :car/colors [[:color/id 1]
+                                                                     [:color/id 2]]}}})}]
+    #_(update-caller-in! mutation-env [:latest-car]
+                         assoc :car/engine "Rolls Royce")
+    (update-caller-in! mutation-env [:person/cars 1]
+                       assoc-in [:car/colors 1] [:color/id 3])
+    #_(update-caller-in! mutation-env [:person/cars 1]
+                         assoc :car/engine "Tesla"))
+
+
+
 
   (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
                                     :person/children [[:person/id 2] [:person/id 3]]}
@@ -335,7 +354,6 @@
 
 ;============================================================================
 
-;; TODO: Untested...make up an env with a state atom and see if it works in clj/cljs
 
 #?(:clj
    (defmacro swap!->
@@ -359,10 +377,37 @@
 
 
 (comment
-  (def env {:state (atom {})})
+
+  (def env {:state (atom {})
+
+            })
   (swap!-> env
            (assoc :x 1)
            (update :x inc))
   (assoc :x 1)
-  (update :x inc))
+  (update :x inc)
+
+
+  (let [mutation-env {:state (atom {:person/id      {1 {:person/id   1
+                                                        :latest-car  [:car/id 2]
+                                                        :person/cars [[:car/id 1] [:car/id 2]]}}
+                                    :fastest-car    [:car/id 1]
+                                    :favourite-cars [[:car/id 1] [:car/id 2]]
+                                    :car/id         {1 {:car/id     1
+                                                        :car/colors [[:color/id 1]]}
+                                                     2 {:car/id     2
+                                                        :car/colors [[:color/id 1]
+                                                                     [:color/id 2]]}}})}]
+
+    (swap!-> mutation-env
+             (assoc :fastest-car "dummy")
+             (update :fastest-car "Ford Mustang"))
+    #_(swap!-> mutation-env
+               (assoc-in [:person/id 1 :person/age] 42)
+               (update-in [:person/id 1 :person/age] inc))
+    #_(swap!-> mutation-env
+               (assoc-in [:person/id 1 :person/name] "James Bond")))
+
+
+  '())
 
