@@ -185,7 +185,7 @@
 
 ;;==========================
 
-(specification "remove-edge*" :focus
+(specification "remove-edge*"
 
   (behavior "Without cascading"
     (let [state {:fastest-car    [:car/id 1]
