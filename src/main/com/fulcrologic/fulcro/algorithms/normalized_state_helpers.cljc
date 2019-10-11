@@ -250,45 +250,9 @@
   "
   [entity-field vector-of-idents]
   [keyword? vector? => any?]
-  (mapv (fn [x] (first (into [] x)))
+  (mapv first
         (sort-by entity-field
                  (map (fn [[k v]] {k v}) vector-of-idents))))
-
-(comment
-
-  (let [entity-field :person/id
-        path [:person/id 1 :person/children]
-        state (atom {:person/id {1 {:person/name     "person-1"
-                                    :person/age      90
-                                    :person/children [[:person/id 3]
-                                                      [:person/id 9]
-                                                      [:person/id 5]
-                                                      [:person/id 1]]}}})
-        vector-of-idents (get-in @state path)]
-    (sort-idents-by entity-field vector-of-idents))
-
-
-
-  (def state-map (atom {:person/id {1 {:person/name              "person-1"
-                                       :person/age               90
-                                       :person/random-collection [[:person/id 3]
-                                                                  [:car/id 9]
-                                                                  [:person/id 5]
-                                                                  [:car/id 5]
-                                                                  [:person/id 1]]
-                                       :person/children          [[:person/id 3]
-                                                                  [:person/id 9]
-                                                                  [:person/id 5]
-                                                                  [:person/id 1]]}}}))
-
-  (swap! state-map update-in [:person/id 1 :person/children] #(sort-idents-by :person/id %))
-
-
-  (update-in @state-map [:person/id 1 :person/random-collection] #(sort-idents-by :person/id %))
-
-
-  '())
-
 
 ;============================================================================
 
@@ -317,8 +281,6 @@
                                                 {:person/id 1 :person/name "Dad"}}})}]
     (update-caller! mutation-env
                     assoc :person/name "Mom"))
-
-
 
 
   '())
@@ -358,9 +320,6 @@
       @state))
 
 
-
-
-
   (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
                                     :person/children [[:person/id 2] [:person/id 3]]}
                                  2 {:person/id 2 :person/name "Son"}
@@ -370,11 +329,6 @@
         args (vector assoc :person/name "Mom")]
 
     (and path (get-in @state path)))
-
-
-
-
-  ;;;;;
 
 
   '())
