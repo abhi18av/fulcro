@@ -368,25 +368,32 @@
 
 ;;============================================================================
 (specification "update-caller!"
-  (behavior "Starting at a table"
+  (behavior "Updates the app state wrt caller"
     (let [mutation-env {:ref   [:person/id 1]
                         :state (atom {:person/id {1 {:person/id   1
                                                      :latest-car  [:car/id 2]
-                                                     :person/cars [[:car/id 1] [:car/id 2]]}}})}]
+                                                     :person/cars [[:car/id 1] [:car/id 2]]}}
+                                      :car/id    {1 {:car/id 1}
+                                                  2 {:car/id 2}}})}]
       (assertions
-        ""
-        (nsh/update-caller! mutation-env
-                            assoc-in [:latest-car] [:car/id 3])
-        "Correctly dissoc"
-        (nsh/update-caller! mutation-env
-                            dissoc :latest-car)
-        ""
-        (nsh/update-caller! mutation-env
-                            assoc :person/name "James Bond")))))
+        "Correctly handles assoc-in"
+        (-> (nsh/update-caller! mutation-env
+                                assoc-in [:latest-car] [:car/id 3])
+            (get-in [:person/id 1 :latest-car])) => [:car/id 3]
+
+        "Correctly handles dissoc'ing"
+        (-> (nsh/update-caller! mutation-env
+                                dissoc :latest-car)
+            (get-in [:latest-car])
+            nil?) => true
+
+        "Correctly handles assoc'ing"
+        (-> (nsh/update-caller! mutation-env assoc :person/name "Bob")
+            (get-in [:person/id 1 :person/name])) => "Bob"))))
 
 ;;============================================================================
 (specification "update-caller-in!"
-  (behavior "..."
+  (behavior "Updates the app state wrt caller"
     (let [mutation-env {:ref   [:person/id 1]
                         :state (atom {:person/id      {1 {:person/id   1
                                                           :latest-car  [:car/id 2]
@@ -398,32 +405,32 @@
                                                        2 {:car/id     2
                                                           :car/colors [[:color/id 1]
                                                                        [:color/id 2]]}}})}]
-      (nsh/update-caller-in! mutation-env [:latest-car]
-                             assoc :car/engine "Rolls Royce")
-      (nsh/update-caller-in! mutation-env [:person/cars 1]
-                             assoc-in [:car/colors 1] [:color/id 3])
-      (nsh/update-caller-in! mutation-env [:person/cars 1]
-                             assoc :car/engine "Tesla"))))
+      (assertions
+        "Follows a to-one ident and updates entity"
+        (-> (nsh/update-caller-in! mutation-env [:latest-car]
+                                assoc :car/engine "Rolls Royce")
+            (nsh/get-in [:car/id 2 :car/engine])) => "Rolls Royce"
+
+        "Follows a to-many ident and updates entity"
+        (-> (nsh/update-caller-in! mutation-env [:person/cars 1]
+                                assoc-in [:car/colors 1] [:color/id 3])
+            (nsh/get-in [:car/id 2 :car/colors])) => [[:color/id 1] [:color/id 3]]))))
 
 ;;============================================================================
-(specification "swap!->"
+(specification "swap!->" :focus
   (behavior "Thread map operations "
-    (let [mutation-env {:state (atom {:person/id      {1 {:person/id   1
-                                                          :latest-car  [:car/id 2]
-                                                          :person/cars [[:car/id 1] [:car/id 2]]}}
-                                      :car/id         {1 {:car/id     1
-                                                          :car/colors [[:color/id 1]]}
-                                                       2 {:car/id     2
-                                                          :car/colors [[:color/id 1]
-                                                                       [:color/id 2]]}}})}]
+    (let [mutation-env {:state (atom {:person/id {1 {:person/id   1
+                                                     :latest-car  [:car/id 2]
+                                                     :person/cars [[:car/id 1] [:car/id 2]]}}
+                                      :car/id    {1 {:car/id     1
+                                                     :car/colors [[:color/id 1]]}
+                                                  2 {:car/id     2
+                                                     :car/colors [[:color/id 1]
+                                                                  [:color/id 2]]}}})}]
 
       (assertions
-        "Able to thread table-nested operations on state atom"
-        (nsh/swap!-> mutation-env
-                     (assoc-in [:person/id 1 :person/age] 42)
-                     (update-in [:person/id 1 :person/age] inc))
-
-        "Able to thread top-level operations on state atom"
-        (nsh/swap!-> mutation-env
-                     (assoc :fastest-car "dummy")
-                     (update ))))))
+        "Threads table-nested operations on state atom"
+        (-> (nsh/swap!-> mutation-env
+                         (assoc-in [:person/id 1 :person/age] 42)
+                         (update-in [:person/id 1 :person/age] inc))
+            (nsh/get-in [:person/id 1 :person/age])) => 43))))

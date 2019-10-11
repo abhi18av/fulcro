@@ -269,15 +269,21 @@
   (let [mutation-env {:ref   [:person/id 1]
                       :state (atom {:person/id {1 {:person/id   1
                                                    :latest-car  [:car/id 2]
-                                                   :person/cars [[:car/id 1] [:car/id 2]]}}})}]
-    #_(update-caller! mutation-env
-                      assoc-in [:latest-car] [:car/id 3])
-    (update-caller! mutation-env
-                    dissoc :latest-car)
-    #_(update-caller! mutation-env
-                      assoc :person/age 42)
-    #_(update-caller! mutation-env
-                      assoc :person/name "James Bond"))
+                                                   :person/cars [[:car/id 1] [:car/id 2]]}}
+                                    :car/id    {1 {:car/id     1
+                                                   :car/colors [[:color/id 1]]}
+                                                2 {:car/id     2
+                                                   :car/colors [[:color/id 1]
+                                                                [:color/id 2]]}}})}]
+    ;"Correctly handles assoc-in inside the ref entity"
+    ;(update-caller! mutation-env assoc-in [:latest-car] [:car/id 3])
+
+    ;"Correctly handles dissoc'ing a top-level edge"
+    (update-caller! mutation-env dissoc :latest-car)        ;=> true
+
+    ;"Correctly handles assoc'ing a primitive value to the caller"
+    ;(update-caller! mutation-env assoc :person/name "Bob") ;=> "Bob"
+    )
 
 
   '())
@@ -305,6 +311,7 @@
 
 (comment
 
+
   (let [mutation-env {:ref   [:person/id 1]
                       :state (atom {:person/id      {1 {:person/id   1
                                                         :latest-car  [:car/id 2]
@@ -316,38 +323,12 @@
                                                      2 {:car/id     2
                                                         :car/colors [[:color/id 1]
                                                                      [:color/id 2]]}}})}]
-    #_(update-caller-in! mutation-env [:latest-car]
-                         assoc :car/engine "Rolls Royce")
-    (update-caller-in! mutation-env [:person/cars 1]
-                       assoc-in [:car/colors 1] [:color/id 3])
-    #_(update-caller-in! mutation-env [:person/cars 1]
-                         assoc :car/engine "Tesla"))
+    ;(update-caller-in! mutation-env [:latest-car] assoc :car/engine "Rolls Royce")
+    (update-caller-in! mutation-env [:person/cars 1] assoc-in [:car/colors 1] [:color/id 3])
+    ;(update-caller-in! mutation-env [:person/cars 1] assoc :car/engine "Tesla")
+    )
 
 
-
-
-  (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
-                                    :person/children [[:person/id 2] [:person/id 3]]}
-                                 2 {:person/id 2 :person/name "Son"}
-                                 3 {:person/id 3 :person/name "Daughter"}}})
-        ref [:person/id 1]
-        path (tree-path->db-path @state (into ref [:person/id 2]))
-        args (vector assoc :person/name "Mom")]
-
-    (if (and path (get-in @state path))
-      (apply swap! state update-in path args)
-      @state))
-
-
-  (let [state (atom {:person/id {1 {:person/id       1 :person/name "Dad"
-                                    :person/children [[:person/id 2] [:person/id 3]]}
-                                 2 {:person/id 2 :person/name "Son"}
-                                 3 {:person/id 3 :person/name "Daughter"}}})
-        ref [:person/id 1]
-        path (tree-path->db-path @state (into ref [:person/id 2]))
-        args (vector assoc :person/name "Mom")]
-
-    (and path (get-in @state path)))
 
 
   '())
@@ -399,9 +380,12 @@
                                                         :car/colors [[:color/id 1]
                                                                      [:color/id 2]]}}})}]
 
-    (swap!-> mutation-env
-             (assoc :fastest-car "dummy")
-             (update :fastest-car "Ford Mustang"))
+    #_(swap!-> mutation-env
+             (assoc-in [:person/id 1 :latest-car] [:car/id 1]))
+
+    #_(swap!-> mutation-env
+               (assoc :fastest-car "dummy")
+               (update :fastest-car "Ford Mustang"))
     #_(swap!-> mutation-env
                (assoc-in [:person/id 1 :person/age] 42)
                (update-in [:person/id 1 :person/age] inc))
