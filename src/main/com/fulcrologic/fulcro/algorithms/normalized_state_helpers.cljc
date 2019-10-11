@@ -221,9 +221,9 @@
    (let [candidate (let [vl (clojure.core/get-in state-map path-to-edge)]
                      (if-not (vector? vl)
                        nil
-                      (cond
-                        (eql/ident? vl) [vl]
-                        (every? eql/ident? vl) vl)))
+                       (cond
+                         (eql/ident? vl) [vl]
+                         (every? eql/ident? vl) vl)))
          final-state (if (some #{path-to-edge} (normalized-paths state-map))
                        (reduce
                          #(remove-entity* %1 %2 cascade)
@@ -236,39 +236,56 @@
 
 ;;============================================================================
 
-;; TODO clarify the exact usage
+
 (>defn sort-idents-by
-  "
-  Intended to be used as
+  "Intended to be used as
    ```
    (sort-idents-by :entity/field vector-of-idents)
    ```
-  Can facilitate:
-  ```
-  (swap! state update-in [:entity 1 :list] sort-idents-by :list/field)
-  ```
+
+   Can facilitate:
+   ```
+   (swap! state-map update-in [:entity 1 :list] #(sort-idents-by :list/field %))
+   ```
   "
   [entity-field vector-of-idents]
   [keyword? vector? => any?]
-  (sort-by second vector-of-idents))
+  (mapv (fn [x] (first (into [] x)))
+        (sort-by entity-field
+                 (map (fn [[k v]] {k v}) vector-of-idents))))
 
 (comment
 
-  (def state (atom {:grandparents [[:person/id 3] [:person/id 2]]
-                    :person/id    {1 {:person/name     "person-1"
-                                      :person/children [[:person/id 3]
-                                                        [:person/id 9]
-                                                        [:person/id 5]]}
-                                   2 {:person/name "person-2"
-                                      :person/cars [[:car/id 1]
-                                                    [:car/id 2]]}}
-                    :car/id       {1 {:car/model "model-1"}
-                                   2 {:car/model "model-2"}}}))
+  (let [entity-field :person/id
+        path [:person/id 1 :person/children]
+        state (atom {:person/id {1 {:person/name     "person-1"
+                                    :person/age      90
+                                    :person/children [[:person/id 3]
+                                                      [:person/id 9]
+                                                      [:person/id 5]
+                                                      [:person/id 1]]}}})
+        vector-of-idents (get-in @state path)]
+    (sort-idents-by entity-field vector-of-idents))
 
 
-  (sort-by second (clojure.core/get-in @state [:person/id 1 :person/children]))
 
-  (swap! state update-in [:person/id 1 :person/children] sort-idents-by :person/id)
+  (def state-map (atom {:person/id {1 {:person/name              "person-1"
+                                       :person/age               90
+                                       :person/random-collection [[:person/id 3]
+                                                                  [:car/id 9]
+                                                                  [:person/id 5]
+                                                                  [:car/id 5]
+                                                                  [:person/id 1]]
+                                       :person/children          [[:person/id 3]
+                                                                  [:person/id 9]
+                                                                  [:person/id 5]
+                                                                  [:person/id 1]]}}}))
+
+  (swap! state-map update-in [:person/id 1 :person/children] #(sort-idents-by :person/id %))
+
+
+  (update-in @state-map [:person/id 1 :person/random-collection] #(sort-idents-by :person/id %))
+
 
   '())
 
